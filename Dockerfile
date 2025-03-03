@@ -33,6 +33,9 @@ RUN rm -rf wkhtmltox
 # Generar las configuraciones locales necesarias
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 
+# Instalar Hex y Rebar
+RUN mix local.hex --force && mix local.rebar --force
+
 # Establecer las variables de entorno para el idioma y la localización
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
