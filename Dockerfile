@@ -1,47 +1,64 @@
-# Definir las versiones de Erlang, Elixir y Debian
-ARG OTP_VERSION=25.0.4
-ARG OTP_VERSION=25.0.4
-ARG ELIXIR_VERSION=1.15.8
-ARG DEBIAN_VERSION=bullseye-20250224-slim
+FROM ubuntu:25.04
 
-# Configuración de las imágenes base para el builder y el runner
-ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
-ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+ENV ERLANG_VERSION=25.3.2
+ENV ELIXIR_VERSION=1.15.5-otp-25
+ENV PHOENIX_VERSION=1.7.20
+ENV NODE_VERSION=18.16.0
 
-# Usar la imagen base de Elixir como builder
-FROM ${BUILDER_IMAGE} AS builder
+## Instalar dependencias necesarias
+RUN apt-get update
+RUN apt-get install -y curl git
+RUN apt-get install -y wget build-essential autoconf m4 libncurses5-dev libssh-dev unixodbc-dev
 
-# Agregar repositorios deb-src y backports correctamente a la lista de fuentes de APT
-RUN echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list \
-    && echo "deb http://deb.debian.org/debian bullseye-updates main" >> /etc/apt/sources.list \
-    && echo "deb http://deb.debian.org/debian bullseye-backports main" >> /etc/apt/sources.list \
-    && apt-get update
+## Instalar herramientas relacionadas con GNOME XML
+RUN apt-get install -y xsltproc fop libxml2-utils libsctp-dev lksctp-tools
 
-# Instalar las dependencias necesarias para construir y manejar GNOME XML
-RUN apt-get install -y build-essential git curl wget autoconf m4 libncurses5-dev libssh-dev unixodbc-dev \
-    xsltproc fop libxml2-utils libsctp-dev lksctp-tools locales sed
-
-# Limpiar la caché de APT para reducir el tamaño de la imagen final
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Instalar WKHTMLTOPDF desde la fuente
+# Descargar e instalar WKHTMLTOPDF
 RUN wget https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.4/wkhtmltox-0.12.4_linux-generic-amd64.tar.xz
 RUN tar xvf wkhtmltox-0.12.4_linux-generic-amd64.tar.xz
 RUN mv wkhtmltox/bin/wkhtmlto* /usr/bin/
 RUN rm -rf wkhtmltox
 
-# Generar las configuraciones locales necesarias
-RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
+# Clonar y configurar asdf (gestor de versiones)
+RUN git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch v0.13.1 && \
+    echo '. $HOME/.asdf/asdf.sh' >> ~/.bashrc && \
+    echo '. $HOME/.asdf/completions/asdf.bash' >> ~/.bashrc
 
-# Instalar Hex y Rebar
-RUN mix local.hex --force && mix local.rebar --force
+# Configurar PATH para asdf
+ENV PATH="/root/.asdf/bin:/root/.asdf/shims:${PATH}"
 
-# Establecer las variables de entorno para el idioma y la localización
+# Verificar la instalación de asdf
+RUN /bin/bash -c "source ~/.bashrc && asdf version"
+
+# Instalar Erlang usando asdf
+RUN /bin/bash -c "asdf plugin-add erlang https://github.com/asdf-vm/asdf-erlang.git"
+ENV KERL_CONFIGURE_OPTIONS --disable-silent-rules --without-javac --enable-shared-zlib --enable-dynamic-ssl-lib --enable-hipe --enable-sctp --enable-smp-support --enable-threads --enable-kernel-poll --enable-wx --disable-debug --without-javac --enable-darwin-64bit
+RUN /bin/bash -c "asdf install erlang $ERLANG_VERSION"
+RUN apt-get install -y locales && locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
+RUN /bin/bash -c "asdf global erlang $ERLANG_VERSION"
 
-# Limpiar los residuos de APT y otras dependencias no necesarias
+# Instalar Elixir usando asdf
+RUN /bin/bash -c "asdf plugin-add elixir https://github.com/asdf-vm/asdf-elixir.git"
+RUN /bin/bash -c "asdf install elixir $ELIXIR_VERSION"
+RUN /bin/bash -c "asdf global elixir $ELIXIR_VERSION"
+
+# Instalar Node.js usando asdf
+RUN /bin/bash -c "source ~/.bashrc && \
+    asdf plugin-add nodejs https://github.com/asdf-vm/asdf-nodejs.git && \
+    asdf install nodejs $NODE_VERSION && \
+    asdf global nodejs $NODE_VERSION"
+
+# Configuraciones finales
+RUN apt-get install -y inotify-tools
+RUN /bin/bash -c "mix local.hex --force"
+RUN /bin/bash -c "mix local.rebar --force"
+RUN /bin/bash -c "mix archive.install --force hex phx_new $PHOENIX_VERSION"
+
+# Limpiar caché de apt para reducir el tamaño de la imagen
 RUN apt-get clean
 RUN apt-get autoclean
 RUN apt-get autoremove
+
